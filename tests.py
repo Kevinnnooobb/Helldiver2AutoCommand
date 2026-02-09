@@ -123,7 +123,8 @@ class TestConfig(unittest.TestCase):
 
     def test_load_default_config(self):
         """Loading from non-existent file returns defaults."""
-        config = load_config("/tmp/nonexistent_config_test.json")
+        nonexistent = os.path.join(tempfile.gettempdir(), "nonexistent_config_test.json")
+        config = load_config(nonexistent)
         self.assertEqual(config["key_bindings"], DEFAULT_KEY_BINDINGS)
         self.assertEqual(config["stratagem_key"], "ctrl")
         self.assertIsInstance(config["key_delay"], float)
@@ -159,7 +160,8 @@ class TestConfig(unittest.TestCase):
             os.unlink(path)
 
     def test_get_key_for_direction(self):
-        config = load_config("/tmp/nonexistent.json")
+        nonexistent = os.path.join(tempfile.gettempdir(), "nonexistent.json")
+        config = load_config(nonexistent)
         self.assertEqual(get_key_for_direction("↑", config), "w")
         self.assertEqual(get_key_for_direction("↓", config), "s")
         self.assertEqual(get_key_for_direction("←", config), "a")
