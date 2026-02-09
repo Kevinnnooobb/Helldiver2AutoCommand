@@ -1,8 +1,7 @@
 """
-按键配置管理
-Manages key bindings for stratagem direction inputs and the stratagem activation key.
-Supports loading/saving custom key bindings from a JSON config file.
-Supports per-stratagem hotkey bindings for in-game quick trigger.
+按键与负载配置管理。
+Manages direction bindings, stratagem activation key, per-stratagem hotkeys,
+and loadout slots with slot-level hotkeys for quick in-game triggers.
 """
 
 import json
@@ -25,6 +24,9 @@ DEFAULT_STRATAGEM_KEY = "ctrl"
 # Delay between key presses in seconds
 DEFAULT_KEY_DELAY = 0.05
 
+# Loadout slots: 0-3 为常用战备，4 为常驻任务战备
+DEFAULT_LOADOUT = [None, None, None, None, None]
+
 
 def _make_default():
     """Return a fresh default config dict."""
@@ -32,8 +34,9 @@ def _make_default():
         "key_bindings": dict(DEFAULT_KEY_BINDINGS),
         "stratagem_key": DEFAULT_STRATAGEM_KEY,
         "key_delay": DEFAULT_KEY_DELAY,
-        "loadout": [],                 # [{"model": "...", "name": "...", "hotkey": "f1"}, ...]
-        "mission_hotkeys": {},         # {"增援": "f9", ...}
+        "stratagem_hotkeys": {},       # {"key_name": {"model": "...", "name": "..."}}
+        "slot_hotkeys": {},            # {"0": "f1", ...}
+        "loadout": list(DEFAULT_LOADOUT),
         "listening_enabled": True,
     }
 
@@ -59,10 +62,14 @@ def load_config(path=None):
             config["stratagem_key"] = data["stratagem_key"]
         if "key_delay" in data:
             config["key_delay"] = float(data["key_delay"])
-        if "loadout" in data and isinstance(data["loadout"], list):
-            config["loadout"] = data["loadout"]
-        if "mission_hotkeys" in data and isinstance(data["mission_hotkeys"], dict):
-            config["mission_hotkeys"] = data["mission_hotkeys"]
+        if "stratagem_hotkeys" in data and isinstance(data["stratagem_hotkeys"], dict):
+            config["stratagem_hotkeys"] = data["stratagem_hotkeys"]
+        if "slot_hotkeys" in data and isinstance(data.get("slot_hotkeys"), dict):
+            config["slot_hotkeys"] = data["slot_hotkeys"]
+        if "loadout" in data and isinstance(data.get("loadout"), list):
+            # 保证长度为 5
+            cfg_loadout = data["loadout"][:5] + [None] * max(0, 5 - len(data["loadout"]))
+            config["loadout"] = cfg_loadout
         if "listening_enabled" in data:
             config["listening_enabled"] = bool(data["listening_enabled"])
         return config
