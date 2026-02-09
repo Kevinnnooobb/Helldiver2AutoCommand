@@ -24,8 +24,9 @@ DEFAULT_STRATAGEM_KEY = "ctrl"
 # Delay between key presses in seconds
 DEFAULT_KEY_DELAY = 0.05
 
-# Loadout slots: 0-3 为常用战备，4 为常驻任务战备
-DEFAULT_LOADOUT = [None, None, None, None, None]
+# Loadout slots (default 5: 4 常用 + 1 常驻，可扩展)
+DEFAULT_SLOT_COUNT = 5
+DEFAULT_LOADOUT = [None] * DEFAULT_SLOT_COUNT
 
 
 def _make_default():
@@ -36,6 +37,7 @@ def _make_default():
         "key_delay": DEFAULT_KEY_DELAY,
         "stratagem_hotkeys": {},       # {"key_name": {"model": "...", "name": "..."}}
         "slot_hotkeys": {},            # {"0": "f1", ...}
+        "slot_count": DEFAULT_SLOT_COUNT,
         "loadout": list(DEFAULT_LOADOUT),
         "listening_enabled": True,
     }
@@ -64,12 +66,23 @@ def load_config(path=None):
             config["key_delay"] = float(data["key_delay"])
         if "stratagem_hotkeys" in data and isinstance(data["stratagem_hotkeys"], dict):
             config["stratagem_hotkeys"] = data["stratagem_hotkeys"]
+        if "slot_count" in data:
+            try:
+                config["slot_count"] = max(1, int(data["slot_count"]))
+            except Exception:
+                pass
+        slot_count = config.get("slot_count", DEFAULT_SLOT_COUNT)
         if "slot_hotkeys" in data and isinstance(data.get("slot_hotkeys"), dict):
-            config["slot_hotkeys"] = data["slot_hotkeys"]
+            # 只保留合法槽位的键
+            config["slot_hotkeys"] = {
+                k: v for k, v in data["slot_hotkeys"].items()
+                if k.isdigit() and int(k) < slot_count
+            }
         if "loadout" in data and isinstance(data.get("loadout"), list):
-            # 保证长度为 5
-            cfg_loadout = data["loadout"][:5] + [None] * max(0, 5 - len(data["loadout"]))
+            cfg_loadout = data["loadout"][:slot_count] + [None] * max(0, slot_count - len(data["loadout"]))
             config["loadout"] = cfg_loadout
+        else:
+            config["loadout"] = [None] * slot_count
         if "listening_enabled" in data:
             config["listening_enabled"] = bool(data["listening_enabled"])
         return config

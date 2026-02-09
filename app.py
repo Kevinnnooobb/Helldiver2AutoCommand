@@ -4,7 +4,7 @@ Helldivers 2 Auto Stratagem Caller - PyQt6 GUI (redesigned)
 
 Highlights:
 - 黑金科幻 UI（更高对比与卡片式排布）
-- 左侧「负载」5 槽：4 个常用战备 + 1 个常驻任务战备
+- 左侧「负载」多槽可配：常用战备 + 常驻任务战备
 - 每槽可绑定独立全局快捷键（按下即在游戏内调用该战备）
 - 按键捕获：方向键、激活键、槽快捷键、单个战备快捷键都靠「按下即可」
 - 搜索 / 分类浏览，双击立即执行；右键菜单快捷操作
@@ -31,7 +31,12 @@ from stratagems import (
     search_stratagems,
     command_to_string,
 )
-from config import load_config, save_config, DEFAULT_KEY_BINDINGS
+from config import (
+    load_config,
+    save_config,
+    DEFAULT_KEY_BINDINGS,
+    DEFAULT_SLOT_COUNT,
+)
 from executor import execute_stratagem
 
 # 列索引
@@ -393,8 +398,11 @@ class LoadoutCard(QFrame):
         self.desc_label.setObjectName("cardDesc")
         self.cmd_label = QLabel("指令: -")
         self.cmd_label.setStyleSheet("color:#d6c060; font-family: Consolas;")
+        self.strat_hotkey_label = QLabel("战备快捷键: -")
+        self.strat_hotkey_label.setStyleSheet("color:#ffa500; font-weight:600;")
         layout.addWidget(self.name_label)
         layout.addWidget(self.cmd_label)
+        layout.addWidget(self.strat_hotkey_label)
         layout.addWidget(self.desc_label)
 
         btns = QHBoxLayout()
@@ -409,18 +417,25 @@ class LoadoutCard(QFrame):
         btns.addWidget(exec_btn)
         layout.addLayout(btns)
 
-    def update_content(self, stratagem: dict | None):
+    def update_content(self, stratagem: dict | None, strat_hotkey: str = ""):
         if stratagem is None:
             self.name_label.setText("未绑定")
             self.cmd_label.setText("指令: -")
+            self.strat_hotkey_label.setText("战备快捷键: -")
             self.desc_label.setText("选择战备后点击“设为当前选择”")
             return
         self.name_label.setText(f"{stratagem['name']}  ({stratagem['model']})")
         self.cmd_label.setText(f"指令: {command_to_string(stratagem['command'])}")
         self.desc_label.setText(stratagem.get("description", ""))
+        hk_text = format_key_display(strat_hotkey)
+        self.strat_hotkey_label.setText(f"战备快捷键: {hk_text if hk_text else '未绑定'}")
 
     def set_hotkey(self, key: str):
         self.hotkey_btn.set_key(key)
+
+    def set_strat_hotkey(self, key: str):
+        hk_text = format_key_display(key)
+        self.strat_hotkey_label.setText(f"战备快捷键: {hk_text if hk_text else '未绑定'}")
 
 class StratagemApp(QMainWindow):
     _hotkey_triggered = pyqtSignal(dict)
@@ -433,6 +448,7 @@ class StratagemApp(QMainWindow):
         self.setMinimumSize(900, 600)
 
         self.config = load_config()
+        self.slot_count = max(1, int(self.config.get("slot_count", DEFAULT_SLOT_COUNT)))
         self._listening = False
         self._executing = False
         self._capture_mode = False
@@ -440,11 +456,14 @@ class StratagemApp(QMainWindow):
         self._hotkey_map: dict[str, dict] = {}
         self._stratagem_hotkeys: dict[tuple, str] = {}
         self.loadout: list[dict | None] = []
-        cfg_loadout = (self.config.get("loadout") or [])[:5]
+        cfg_loadout = (self.config.get("loadout") or [])[: self.slot_count]
         self.loadout.extend(cfg_loadout)
-        while len(self.loadout) < 5:
+        while len(self.loadout) < self.slot_count:
             self.loadout.append(None)
-        self.slot_hotkeys: dict[str, str] = self.config.get("slot_hotkeys", {})
+        # 只保留合法槽位快捷键
+        self.slot_hotkeys: dict[str, str] = {
+            k: v for k, v in self.config.get("slot_hotkeys", {}).items() if k.isdigit() and int(k) < self.slot_count
+        }
         self.slot_key_map: dict[str, int] = {}
 
         self._build_hotkey_maps()
@@ -487,23 +506,24 @@ class StratagemApp(QMainWindow):
         # 左侧负载
         loadout_panel = QVBoxLayout()
         loadout_panel.setSpacing(8)
-        header = QLabel("⚔ 任务负载 / 4 + 常驻任务")
+        header = QLabel(f"⚔ 任务负载（槽位 {self.slot_count}）")
         header.setStyleSheet("font-size:16px; font-weight:700;")
         loadout_panel.addWidget(header)
 
         self.slot_cards: list[LoadoutCard] = []
-        slot_titles = ["槽1", "槽2", "槽3", "槽4", "任务常驻"]
-        slot_desc = ["常用战备槽", "常用战备槽", "常用战备槽", "常用战备槽", "用于任务常驻战备"]
-        for idx in range(5):
-            card = LoadoutCard(idx, slot_titles[idx], slot_desc[idx], self.slot_hotkeys.get(str(idx), ""), self)
-            if idx == 4:
+        for idx in range(self.slot_count):
+            is_mission = idx == self.slot_count - 1
+            title = "任务常驻" if is_mission else f"槽{idx+1}"
+            desc = "用于任务常驻战备" if is_mission else "常用战备槽"
+            card = LoadoutCard(idx, title, desc, self.slot_hotkeys.get(str(idx), ""), self)
+            if is_mission:
                 card.setProperty("mission", True)
             card.assign_clicked.connect(self._assign_selected_to_slot)
             card.clear_clicked.connect(self._clear_slot)
             card.execute_clicked.connect(self._execute_slot)
             card.hotkey_changed.connect(self._set_slot_hotkey)
             self.slot_cards.append(card)
-            card.update_content(self._find_stratagem_in_loadout(idx))
+            card.update_content(self._find_stratagem_in_loadout(idx), self._hotkey_for_loadout(idx))
             loadout_panel.addWidget(card)
 
         loadout_panel.addStretch()
@@ -631,6 +651,12 @@ class StratagemApp(QMainWindow):
         for t in self.category_tables.values():
             self._refresh_hotkey_column(t)
         self._refresh_hotkey_column(self.search_table)
+        self._refresh_slot_hotkeys()
+
+    def _refresh_slot_hotkeys(self):
+        for idx, card in enumerate(self.slot_cards):
+            hk = self._hotkey_for_loadout(idx)
+            card.set_strat_hotkey(hk)
 
     def _active_table(self) -> QTableWidget:
         w = self.tab_widget.currentWidget()
@@ -693,8 +719,9 @@ class StratagemApp(QMainWindow):
         sub_slots = menu.addMenu("设为槽位")
         slot_actions = []
         if sub_slots:
-            for idx in range(5):
-                text = f"槽{idx+1}" if idx < 4 else "任务常驻"
+            for idx in range(self.slot_count):
+                is_mission = idx == self.slot_count - 1
+                text = "任务常驻" if is_mission else f"槽{idx+1}"
                 act = sub_slots.addAction(text)
                 slot_actions.append(act)
         viewport = table.viewport()
@@ -742,23 +769,31 @@ class StratagemApp(QMainWindow):
             self._assign_to_slot(idx, s)
 
     def _assign_to_slot(self, idx: int, stratagem: dict):
+        if idx < 0 or idx >= self.slot_count:
+            return
         self.loadout[idx] = {"model": stratagem["model"], "name": stratagem["name"]}
-        self.slot_cards[idx].update_content(stratagem)
+        self.slot_cards[idx].update_content(stratagem, self._stratagem_hotkeys.get((stratagem["model"], stratagem["name"]), ""))
         self._persist_loadout()
         self._update_status(f"槽 {idx+1} 已设置为 {stratagem['name']}")
 
     def _clear_slot(self, idx: int):
+        if idx < 0 or idx >= self.slot_count:
+            return
         self.loadout[idx] = None
-        self.slot_cards[idx].update_content(None)
+        self.slot_cards[idx].update_content(None, "")
         self._persist_loadout()
         self._update_status(f"槽 {idx+1} 已清除")
 
     def _execute_slot(self, idx: int):
+        if idx < 0 or idx >= self.slot_count:
+            return
         stratagem = self._find_stratagem_in_loadout(idx)
         if stratagem:
             self._execute_stratagem(stratagem)
 
     def _find_stratagem_in_loadout(self, idx: int) -> dict | None:
+        if idx < 0 or idx >= self.slot_count:
+            return None
         item = self.loadout[idx]
         if not item:
             return None
@@ -767,8 +802,17 @@ class StratagemApp(QMainWindow):
                 return s
         return None
 
+    def _hotkey_for_loadout(self, idx: int) -> str:
+        if idx < 0 or idx >= self.slot_count:
+            return ""
+        item = self.loadout[idx]
+        if not item:
+            return ""
+        return self._stratagem_hotkeys.get((item.get("model"), item.get("name")), "")
+
     def _persist_loadout(self):
         self.config["loadout"] = self.loadout
+        self.config["slot_count"] = self.slot_count
         save_config(self.config)
 
     # ------------- 战备快捷键（单个） -------------
@@ -817,6 +861,8 @@ class StratagemApp(QMainWindow):
 
     # ------------- 槽位快捷键 -------------
     def _set_slot_hotkey(self, idx: int, key: str):
+        if idx < 0 or idx >= self.slot_count:
+            return
         if key is None:
             return
         if key == "":
@@ -830,6 +876,7 @@ class StratagemApp(QMainWindow):
         self.config["slot_hotkeys"] = self.slot_hotkeys
         save_config(self.config)
         self._rebuild_slot_key_map()
+        self.slot_cards[idx].set_hotkey(key)
         self._update_status(f"槽 {idx+1} 快捷键已更新为 {format_key_display(key)}" if key else f"槽 {idx+1} 快捷键已清除")
 
     # ------------- 全局监听 -------------
