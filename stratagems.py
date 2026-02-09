@@ -17,12 +17,12 @@ CATEGORY_ORBITAL = "轨道火力"
 CATEGORY_EAGLE = "飞鹰"
 CATEGORY_SUPPORT_WEAPONS = "支援武器"
 CATEGORY_SENTRIES = "哨戒炮"
-CATEGORY_MINES_EMPLACEMENTS = "地雷和emplacements"
+CATEGORY_MINES_EMPLACEMENTS = "地雷，盾和手操炮台"
 CATEGORY_BACKPACKS = "背包"
 CATEGORY_VEHICLES = "载具"
 
 STRATAGEMS = [
-    # ========== 任务战备 ==========
+    # ========== 任务战备 — 通用 ==========
     {
         "category": CATEGORY_MISSION,
         "model": "无型号",
@@ -35,7 +35,7 @@ STRATAGEMS = [
         "model": "无型号",
         "name": "SOS 信标",
         "command": [UP, DOWN, RIGHT, UP],
-        "description": "提供任务优先与公开",
+        "description": "提供任务优先与公开，仅主机可用",
     },
     {
         "category": CATEGORY_MISSION,
@@ -47,9 +47,104 @@ STRATAGEMS = [
     {
         "category": CATEGORY_MISSION,
         "model": "无型号",
-        "name": "便携式地狱火炸弹(任务)",
-        "command": [DOWN, RIGHT, UP, UP, UP],
-        "description": "呼叫战役投放",
+        "name": "飞鹰重新装填",
+        "command": [UP, UP, LEFT, UP, RIGHT],
+        "description": "令飞鹰返回超级驱逐舰补给弹药",
+    },
+
+    # ========== 任务战备 — 目标 ==========
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "SSSD 交付",
+        "command": [DOWN, DOWN, DOWN, UP, UP],
+        "description": "呼叫 SSSD 硬盘",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "勘探钻机",
+        "command": [DOWN, DOWN, LEFT, RIGHT, DOWN, DOWN],
+        "description": "地质勘测任务主目标",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "超级地球旗帜",
+        "command": [DOWN, UP, DOWN, UP],
+        "description": "升旗任务主目标",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "地狱炸弹",
+        "command": [DOWN, UP, LEFT, DOWN, UP, RIGHT, DOWN, UP],
+        "description": "呼叫地狱炸弹",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "上传数据",
+        "command": [LEFT, RIGHT, UP, UP, UP],
+        "description": "上传逃生舱数据副目标",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "地震探测器",
+        "command": [UP, UP, LEFT, RIGHT, DOWN, DOWN],
+        "description": "地质勘测副目标",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "暗流体容器",
+        "command": [UP, LEFT, RIGHT, DOWN, UP, UP],
+        "description": "部署暗流体任务专属，充当强化喷射背包",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "构造钻机",
+        "command": [UP, DOWN, UP, DOWN, UP, DOWN],
+        "description": "部署暗流体任务专属，需装填暗流体容器并防守",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "蜂巢破碎钻机",
+        "command": [LEFT, UP, DOWN, RIGHT, DOWN, DOWN],
+        "description": "核弹巢穴任务主目标",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "货物集装箱",
+        "command": [UP, UP, DOWN, DOWN, RIGHT, DOWN],
+        "description": "用于收纳聚变电池和高级铂金",
+    },
+
+    # ========== 任务战备 — 其他 ==========
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "轨道照明弹",
+        "command": [RIGHT, RIGHT, LEFT, LEFT],
+        "description": "仅在超级驱逐舰战备英雄小游戏中出现",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "SEAF 火炮",
+        "command": [RIGHT, UP, UP, DOWN],
+        "description": "完成 SEAF 火炮副目标后解锁，效果取决于装填弹种",
+    },
+    {
+        "category": CATEGORY_MISSION,
+        "model": "无型号",
+        "name": "呼叫超级驱逐舰",
+        "command": [UP, UP, DOWN, DOWN, LEFT, RIGHT, LEFT, RIGHT],
+        "description": "突击任务中呼叫超级驱逐舰支援 1 分钟",
     },
 
     # ========== 轨道火力 ==========
