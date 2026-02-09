@@ -2,6 +2,7 @@
 按键配置管理
 Manages key bindings for stratagem direction inputs and the stratagem activation key.
 Supports loading/saving custom key bindings from a JSON config file.
+Supports per-stratagem hotkey bindings for in-game quick trigger.
 """
 
 import json
@@ -25,16 +26,24 @@ DEFAULT_STRATAGEM_KEY = "ctrl"
 DEFAULT_KEY_DELAY = 0.05
 
 
+def _make_default():
+    """Return a fresh default config dict."""
+    return {
+        "key_bindings": dict(DEFAULT_KEY_BINDINGS),
+        "stratagem_key": DEFAULT_STRATAGEM_KEY,
+        "key_delay": DEFAULT_KEY_DELAY,
+        "loadout": [],                 # [{"model": "...", "name": "...", "hotkey": "f1"}, ...]
+        "mission_hotkeys": {},         # {"增援": "f9", ...}
+        "listening_enabled": True,
+    }
+
+
 def load_config(path=None):
     """Load configuration from a JSON file. Returns default config if file doesn't exist."""
     if path is None:
         path = DEFAULT_CONFIG_PATH
 
-    default = {
-        "key_bindings": dict(DEFAULT_KEY_BINDINGS),
-        "stratagem_key": DEFAULT_STRATAGEM_KEY,
-        "key_delay": DEFAULT_KEY_DELAY,
-    }
+    default = _make_default()
 
     if not os.path.exists(path):
         return default
@@ -50,6 +59,12 @@ def load_config(path=None):
             config["stratagem_key"] = data["stratagem_key"]
         if "key_delay" in data:
             config["key_delay"] = float(data["key_delay"])
+        if "loadout" in data and isinstance(data["loadout"], list):
+            config["loadout"] = data["loadout"]
+        if "mission_hotkeys" in data and isinstance(data["mission_hotkeys"], dict):
+            config["mission_hotkeys"] = data["mission_hotkeys"]
+        if "listening_enabled" in data:
+            config["listening_enabled"] = bool(data["listening_enabled"])
         return config
     except (json.JSONDecodeError, ValueError, OSError):
         return default
