@@ -1,13 +1,14 @@
 """
-绝地潜兵2 自动呼叫战备 - PyQt6 界面（新版）
-Helldivers 2 Auto Stratagem Caller - PyQt6 GUI (redesigned)
+绝地潜兵2 自动呼叫战备 — PyQt6 界面 (v3 Redesign)
+Helldivers 2 Auto Stratagem Caller — PyQt6 GUI
 
-Highlights:
-- 黑金科幻 UI（更高对比与卡片式排布）
-- 左侧「负载」多槽可配：常用战备 + 常驻任务战备
-- 每槽可绑定独立全局快捷键（按下即在游戏内调用该战备）
-- 按键捕获：方向键、激活键、槽快捷键、单个战备快捷键都靠「按下即可」
-- 搜索 / 分类浏览，双击立即执行；右键菜单快捷操作
+Layout:
+  ┌─────────────────────────────────────────────────────┐
+  │  上部：设置栏 + Profile 管理                         │
+  ├─────────────────────────────────────────────────────┤
+  │  下部：2×5 战备选择网格                              │
+  │  点击按钮 → 1 级分类菜单 → 2 级选择具体战备           │
+  └─────────────────────────────────────────────────────┘
 """
 
 import sys
@@ -16,38 +17,29 @@ import keyboard
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTabWidget, QTableWidget, QTableWidgetItem, QPushButton,
-    QLineEdit, QLabel, QDialog, QFormLayout, QDoubleSpinBox,
-    QStatusBar, QHeaderView, QMenu, QMessageBox, QGroupBox,
-    QAbstractItemView, QFrame, QSizePolicy, QSpacerItem
+    QPushButton, QLineEdit, QLabel, QDialog, QFormLayout,
+    QDoubleSpinBox, QStatusBar, QMenu, QMessageBox,
+    QGroupBox, QFrame, QGridLayout, QComboBox, QInputDialog,
+    QSizePolicy,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtGui import QFont, QColor, QIcon
 
 from stratagems import (
     STRATAGEMS,
     get_categories,
     get_stratagems_by_category,
-    search_stratagems,
     command_to_string,
 )
 from config import (
-    load_config,
-    save_config,
-    DEFAULT_KEY_BINDINGS,
-    DEFAULT_SLOT_COUNT,
+    load_config, save_config,
+    DEFAULT_KEY_BINDINGS, SLOT_COUNT,
+    list_profiles, save_profile, load_profile, delete_profile,
 )
 from executor import execute_stratagem
 
-# 列索引
-COL_MODEL = 0
-COL_NAME = 1
-COL_COMMAND = 2
-COL_HOTKEY = 3
-COL_DESC = 4
-COLUMN_HEADERS = ["型号", "名称", "指令码", "快捷键", "描述"]
+# ──────────────────────── 按键显示 ────────────────────────
 
-# 按键显示
 _KEY_DISPLAY = {
     "up": "↑", "down": "↓", "left": "←", "right": "→",
     "right ctrl": "右Ctrl", "left ctrl": "左Ctrl", "ctrl": "Ctrl",
@@ -61,118 +53,232 @@ _KEY_DISPLAY = {
 for _i in range(1, 13):
     _KEY_DISPLAY[f"f{_i}"] = f"F{_i}"
 
+
 def format_key_display(key_name: str) -> str:
     if not key_name:
         return ""
     return _KEY_DISPLAY.get(key_name.lower(), key_name.upper())
 
-# 样式表 — 深色金属 + 斜切分割
+
+# ──────────────────────── 样式表 ────────────────────────
+
 STYLESHEET = """
+/* ===================== 全局基础 ===================== */
 QMainWindow, QWidget {
-    background-color: #0b0c0f;
-    color: #f8e287;
+    background-color: #0a0b10;
+    color: #f0e4a8;
     font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
     font-size: 13px;
 }
+QLabel { font-size: 13px; }
 
-/* 顶部条 */
+/* ===================== 顶部工具栏 ===================== */
 #topBar {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 #111218, stop:0.5 #1a1c24, stop:1 #111218);
-    border: 1px solid #2c2a1a;
-    border-radius: 6px;
-    padding: 8px;
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+        stop:0 #10111a, stop:0.5 #1a1d28, stop:1 #10111a);
+    border: 1px solid #2e2c1e;
+    border-radius: 8px;
+    padding: 10px 16px;
 }
 
-QLineEdit {
-    background-color: #151722;
-    color: #f8e287;
-    border: 1px solid #4a3b15;
-    border-radius: 5px;
+/* ===================== 按钮（通用） ===================== */
+QPushButton {
+    background-color: #1a1d28;
+    color: #f0e4a8;
+    border: 1px solid #d4a825;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    min-height: 18px;
+}
+QPushButton:hover {
+    background-color: #252838;
+    border-color: #f5c842;
+    color: #fff;
+}
+QPushButton:pressed {
+    background-color: #f5c842;
+    color: #0a0b10;
+    border-color: #f5c842;
+}
+QPushButton:disabled {
+    color: #5c5228;
+    border-color: #332c14;
+    background-color: #12131a;
+}
+
+/* 监听按钮 */
+QPushButton#listenBtn[active="true"] {
+    border-color: #4be85c;
+    color: #4be85c;
+    font-weight: 700;
+}
+
+/* 按键捕获按钮 */
+QPushButton#captureBtn {
+    border-color: #6d5a1a;
+    min-width: 100px;
     padding: 6px 10px;
+    font-size: 12px;
+}
+QPushButton#captureBtn:hover { border-color: #f5c842; color: #fff; }
+QPushButton#captureBtn[capturing="true"] {
+    border-color: #ffa500;
+    color: #ffa500;
+    font-weight: 700;
+}
+
+/* ===================== 战备槽位按钮 ===================== */
+QPushButton#slotBtn {
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #161924, stop:1 #0f1018);
+    border: 2px solid #2e2c1e;
+    border-radius: 10px;
+    color: #6a5e30;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 6px;
+    min-height: 100px;
+}
+QPushButton#slotBtn:hover {
+    border-color: #d4a825;
+    color: #f0e4a8;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #1e2130, stop:1 #141620);
+}
+QPushButton#slotBtn[filled="true"] {
+    border-color: #f5c842;
+    color: #f5c842;
+    background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #1a1812, stop:1 #12110d);
+}
+QPushButton#slotBtn[filled="true"]:hover {
+    border-color: #ffe066;
+    color: #fff;
+}
+
+/* ===================== 下拉框 ===================== */
+QComboBox {
+    background-color: #131520;
+    color: #f0e4a8;
+    border: 1px solid #4a3b15;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    min-width: 160px;
+}
+QComboBox:focus { border-color: #f5c842; }
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+QComboBox QAbstractItemView {
+    background-color: #141620;
+    color: #f0e4a8;
+    border: 1px solid #2e2c1e;
+    selection-background-color: #2a2d3a;
+    selection-color: #fff;
+}
+
+/* ===================== 输入框 ===================== */
+QLineEdit {
+    background-color: #131520;
+    color: #f0e4a8;
+    border: 1px solid #4a3b15;
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 13px;
     selection-background-color: #f5c842;
-    selection-color: #0b0c0f;
+    selection-color: #0a0b10;
 }
 QLineEdit:focus { border-color: #f5c842; }
 
-QPushButton {
-    background-color: #161820;
-    color: #f8e287;
-    border: 1px solid #f5c842;
+/* ===================== 菜单 ===================== */
+QMenu {
+    background-color: #141620;
+    color: #f0e4a8;
+    border: 1px solid #2e2c1e;
     border-radius: 6px;
-    padding: 7px 14px;
-    font-weight: 600;
+    padding: 4px;
+    font-size: 13px;
 }
-QPushButton:hover { background-color: #1e2130; border-color: #ffd86a; }
-QPushButton:pressed { background-color: #f5c842; color: #0b0c0f; }
-QPushButton:disabled { color: #72652c; border-color: #403614; }
-QPushButton#executeBtn { border-width: 2px; background-color: #272a36; }
-QPushButton#listenBtn[active="true"] { border-color: #4be85c; color: #4be85c; }
-QPushButton#captureBtn { border-color: #78621f; min-width: 110px; }
-QPushButton#captureBtn[capturing="true"] { border-color: #ffa500; color: #ffa500; }
-
-QTabWidget::pane {
-    border: 1px solid #2c2a1a;
-    background-color: #101019;
-    border-radius: 6px;
+QMenu::item {
+    padding: 8px 24px 8px 12px;
+    border-radius: 4px;
 }
-QTabBar::tab {
-    background: #151722;
-    color: #b7a04d;
-    border: 1px solid #2c2a1a;
-    padding: 8px 18px;
-    margin-right: 3px;
-    border-top-left-radius: 5px;
-    border-top-right-radius: 5px;
-    font-weight: bold;
+QMenu::item:selected {
+    background-color: #2a2d3a;
+    color: #fff;
 }
-QTabBar::tab:selected { background: #1f2230; color: #f8e287; border-bottom: 2px solid #f5c842; }
-QTabBar::tab:hover:!selected { background: #1b1e2a; }
-
-QTableWidget {
-    background-color: #101019;
-    alternate-background-color: #131624;
-    color: #e8d27a;
-    border: 1px solid #2c2a1a;
-    gridline-color: #26231a;
-    selection-background-color: #2c2f3f;
-    selection-color: #f8e287;
-}
-QHeaderView::section {
-    background-color: #171a24;
-    color: #f8e287;
-    border: 1px solid #2c2a1a;
-    padding: 6px 8px;
-    font-weight: bold;
+QMenu::separator {
+    height: 1px;
+    background: #2e2c1e;
+    margin: 4px 8px;
 }
 
+/* ===================== 分组框 ===================== */
 QGroupBox {
-    border: 1px solid #2c2a1a;
-    border-radius: 6px;
-    margin-top: 12px;
-    padding-top: 14px;
+    border: 1px solid #2e2c1e;
+    border-radius: 8px;
+    margin-top: 14px;
+    padding-top: 16px;
     color: #f5c842;
     font-weight: bold;
+    font-size: 13px;
 }
-QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; }
-
-#cardFrame {
-    background: #11141f;
-    border: 1px solid #2c2a1a;
-    border-radius: 10px;
-    padding: 10px;
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 14px;
+    padding: 0 8px;
 }
-#cardFrame[mission="true"] { border-color: #3f2b00; background: #161922; }
-#cardTitle { font-size: 14px; font-weight: 700; color: #f5c842; }
-#cardDesc { color: #9c8b48; font-size: 12px; }
 
+/* ===================== 状态栏 ===================== */
 QStatusBar {
-    background: #0c0d12;
-    color: #bfae62;
-    border-top: 1px solid #2c2a1a;
+    background: #0c0d14;
+    color: #d4c674;
+    border-top: 1px solid #2e2c1e;
+    font-size: 12px;
+    padding: 3px 8px;
+}
+
+/* ===================== 对话框 ===================== */
+QDialog {
+    background-color: #0e0f16;
+    color: #f0e4a8;
+}
+QDoubleSpinBox {
+    background-color: #131520;
+    color: #f0e4a8;
+    border: 1px solid #4a3b15;
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-size: 13px;
+}
+QDoubleSpinBox:focus { border-color: #f5c842; }
+
+/* ===================== 网格区域标题 ===================== */
+#gridTitle {
+    font-size: 18px;
+    font-weight: 800;
+    color: #f5c842;
+    letter-spacing: 2px;
+    padding: 6px 0;
+}
+#gridSubtitle {
+    color: #9c8b48;
     font-size: 12px;
 }
+
+/* ===================== 分隔线 ===================== */
+#separator {
+    background-color: #2e2c1e;
+    min-height: 1px;
+    max-height: 1px;
+}
 """
+
+# ──────────────────────── 按键捕获按钮 ────────────────────
 
 class KeyCaptureButton(QPushButton):
     key_captured = pyqtSignal(str)
@@ -200,6 +306,8 @@ class KeyCaptureButton(QPushButton):
             return
         self._capturing = True
         self.setProperty("capturing", True)
+        self.style().unpolish(self)
+        self.style().polish(self)
         self.setText("⌨ 按下按键…")
         self._hook = keyboard.on_press(self._on_key)
 
@@ -219,6 +327,8 @@ class KeyCaptureButton(QPushButton):
         self._current = key_name
         self.setText(format_key_display(key_name))
         self.setProperty("capturing", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
         self.key_captured.emit(key_name)
 
     def cleanup(self):
@@ -230,69 +340,8 @@ class KeyCaptureButton(QPushButton):
             self._hook = None
         self._capturing = False
 
-class KeyCaptureDialog(QDialog):
-    def __init__(self, parent=None, title="设置快捷键"):
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setFixedSize(340, 180)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
-        self.captured_key: str | None = None
-        self._hook = keyboard.on_press(self._on_key)
-        self._done = False
 
-        layout = QVBoxLayout(self)
-        hint = QLabel("请按下要绑定的快捷键")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setFont(QFont("Microsoft YaHei UI", 13))
-        layout.addWidget(hint)
-
-        sub = QLabel("支持 F1-F12 / 小键盘 / 方向键 / 右Ctrl 等\n按 Esc 取消 / 按 Del 清除")
-        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sub.setStyleSheet("color:#9c8b48;")
-        layout.addWidget(sub)
-
-        self.key_label = QLabel("")
-        self.key_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.key_label.setFont(QFont("Microsoft YaHei UI", 22, QFont.Weight.Bold))
-        self.key_label.setStyleSheet("color:#ffa500;")
-        layout.addWidget(self.key_label)
-
-    def _on_key(self, event):
-        if self._done:
-            return
-        name = event.name
-        if name in ("escape", "esc"):
-            self._done = True
-            QTimer.singleShot(0, self.reject)
-            return
-        if name == "delete":
-            self._done = True
-            self.captured_key = ""
-            QTimer.singleShot(0, self.accept)
-            return
-        self._done = True
-        self.captured_key = name
-        QTimer.singleShot(0, lambda: self._show_and_accept(name))
-
-    def _show_and_accept(self, key_name: str):
-        self.key_label.setText(format_key_display(key_name))
-        QTimer.singleShot(250, self.accept)
-
-    def reject(self):
-        self._unhook()
-        super().reject()
-
-    def _unhook(self):
-        if self._hook:
-            try:
-                keyboard.unhook(self._hook)
-            except Exception:
-                pass
-            self._hook = None
-
-    def closeEvent(self, a0):
-        self._unhook()
-        super().closeEvent(a0)
+# ──────────────────────── 设置对话框 ────────────────────
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None, config: dict | None = None):
@@ -366,435 +415,325 @@ class SettingsDialog(QDialog):
             btn.cleanup()
         super().closeEvent(a0)
 
-class LoadoutCard(QFrame):
-    assign_clicked = pyqtSignal(int)
-    clear_clicked = pyqtSignal(int)
-    execute_clicked = pyqtSignal(int)
-    hotkey_changed = pyqtSignal(int, str)
 
-    def __init__(self, index: int, title: str, desc: str, hotkey: str, parent=None):
-        super().__init__(parent)
-        self.index = index
-        self.setObjectName("cardFrame")
-        self._build_ui(title, desc, hotkey)
-
-    def _build_ui(self, title: str, desc: str, hotkey: str):
-        layout = QVBoxLayout(self)
-        header = QHBoxLayout()
-        title_label = QLabel(title)
-        title_label.setObjectName("cardTitle")
-        header.addWidget(title_label)
-        header.addStretch()
-        self.hotkey_btn = KeyCaptureButton(hotkey, self)
-        self.hotkey_btn.setFixedWidth(110)
-        self.hotkey_btn.key_captured.connect(lambda k, idx=self.index: self.hotkey_changed.emit(idx, k))
-        header.addWidget(QLabel("槽快捷键"))
-        header.addWidget(self.hotkey_btn)
-        layout.addLayout(header)
-
-        self.name_label = QLabel("未绑定")
-        self.name_label.setStyleSheet("font-size:15px; font-weight:700;")
-        self.desc_label = QLabel(desc)
-        self.desc_label.setObjectName("cardDesc")
-        self.cmd_label = QLabel("指令: -")
-        self.cmd_label.setStyleSheet("color:#d6c060; font-family: Consolas;")
-        self.strat_hotkey_label = QLabel("战备快捷键: -")
-        self.strat_hotkey_label.setStyleSheet("color:#ffa500; font-weight:600;")
-        layout.addWidget(self.name_label)
-        layout.addWidget(self.cmd_label)
-        layout.addWidget(self.strat_hotkey_label)
-        layout.addWidget(self.desc_label)
-
-        btns = QHBoxLayout()
-        assign = QPushButton("设为当前选择")
-        assign.clicked.connect(lambda _=False, idx=self.index: self.assign_clicked.emit(idx))
-        clear = QPushButton("清除")
-        clear.clicked.connect(lambda _=False, idx=self.index: self.clear_clicked.emit(idx))
-        exec_btn = QPushButton("▶ 执行")
-        exec_btn.clicked.connect(lambda _=False, idx=self.index: self.execute_clicked.emit(idx))
-        btns.addWidget(assign)
-        btns.addWidget(clear)
-        btns.addWidget(exec_btn)
-        layout.addLayout(btns)
-
-    def update_content(self, stratagem: dict | None, strat_hotkey: str = ""):
-        if stratagem is None:
-            self.name_label.setText("未绑定")
-            self.cmd_label.setText("指令: -")
-            self.strat_hotkey_label.setText("战备快捷键: -")
-            self.desc_label.setText("选择战备后点击“设为当前选择”")
-            return
-        self.name_label.setText(f"{stratagem['name']}  ({stratagem['model']})")
-        self.cmd_label.setText(f"指令: {command_to_string(stratagem['command'])}")
-        self.desc_label.setText(stratagem.get("description", ""))
-        hk_text = format_key_display(strat_hotkey)
-        self.strat_hotkey_label.setText(f"战备快捷键: {hk_text if hk_text else '未绑定'}")
-
-    def set_hotkey(self, key: str):
-        self.hotkey_btn.set_key(key)
-
-    def set_strat_hotkey(self, key: str):
-        hk_text = format_key_display(key)
-        self.strat_hotkey_label.setText(f"战备快捷键: {hk_text if hk_text else '未绑定'}")
+# ──────────────────────── 主窗口 ────────────────────
 
 class StratagemApp(QMainWindow):
-    _hotkey_triggered = pyqtSignal(dict)
     _slot_triggered = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("绝地潜兵2 自动呼叫战备")
-        self.resize(1180, 760)
-        self.setMinimumSize(900, 600)
+        self.setWindowTitle("绝地潜兵2 — 自动呼叫战备")
+        self.resize(960, 620)
+        self.setMinimumSize(800, 520)
 
         self.config = load_config()
-        self.slot_count = max(1, int(self.config.get("slot_count", DEFAULT_SLOT_COUNT)))
         self._listening = False
         self._executing = False
         self._capture_mode = False
         self._global_hook = None
-        self._hotkey_map: dict[str, dict] = {}
-        self._stratagem_hotkeys: dict[tuple, str] = {}
-        self.loadout: list[dict | None] = []
-        cfg_loadout = (self.config.get("loadout") or [])[: self.slot_count]
-        self.loadout.extend(cfg_loadout)
-        while len(self.loadout) < self.slot_count:
-            self.loadout.append(None)
-        # 只保留合法槽位快捷键
-        self.slot_hotkeys: dict[str, str] = {
-            k: v for k, v in self.config.get("slot_hotkeys", {}).items() if k.isdigit() and int(k) < self.slot_count
-        }
-        self.slot_key_map: dict[str, int] = {}
 
-        self._build_hotkey_maps()
+        # 固定 10 槽位 (2×5)，每次启动为空
+        self.loadout: list[dict | None] = [None] * SLOT_COUNT
+        self.slot_hotkeys: dict[str, str] = {}
+        self.slot_key_map: dict[str, int] = {}
+        self._rebuild_slot_key_map()
+
         self._build_ui()
-        self._hotkey_triggered.connect(self._on_hotkey_triggered)
         self._slot_triggered.connect(self._execute_slot)
 
         if self.config.get("listening_enabled", True):
             self._start_listening()
 
-    # ------------- 构建热键映射 -------------
-    def _build_hotkey_maps(self):
-        self._hotkey_map.clear()
-        self._stratagem_hotkeys.clear()
-        for key_name, info in self.config.get("stratagem_hotkeys", {}).items():
-            model, name = info.get("model"), info.get("name")
-            if not model or not name:
-                continue
-            self._stratagem_hotkeys[(model, name)] = key_name
-            for s in STRATAGEMS:
-                if s["model"] == model and s["name"] == name:
-                    self._hotkey_map[key_name] = s
-                    break
-        self._rebuild_slot_key_map()
-
+    # ─────────── 槽位键映射 ───────────
     def _rebuild_slot_key_map(self):
         self.slot_key_map.clear()
         for slot_str, key in self.slot_hotkeys.items():
             if key:
                 self.slot_key_map[key] = int(slot_str)
 
-    # ------------- UI -------------
+    # ─────────── UI 构建 ───────────
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        main = QHBoxLayout(central)
-        main.setContentsMargins(10, 10, 10, 6)
-        main.setSpacing(10)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(14, 10, 14, 6)
+        root.setSpacing(10)
 
-        # 左侧负载
-        loadout_panel = QVBoxLayout()
-        loadout_panel.setSpacing(8)
-        header = QLabel(f"⚔ 任务负载（槽位 {self.slot_count}）")
-        header.setStyleSheet("font-size:16px; font-weight:700;")
-        loadout_panel.addWidget(header)
+        # ═══════ 上部：工具栏 ═══════
+        self._build_top_bar(root)
 
-        self.slot_cards: list[LoadoutCard] = []
-        for idx in range(self.slot_count):
-            is_mission = idx == self.slot_count - 1
-            title = "任务常驻" if is_mission else f"槽{idx+1}"
-            desc = "用于任务常驻战备" if is_mission else "常用战备槽"
-            card = LoadoutCard(idx, title, desc, self.slot_hotkeys.get(str(idx), ""), self)
-            if is_mission:
-                card.setProperty("mission", True)
-            card.assign_clicked.connect(self._assign_selected_to_slot)
-            card.clear_clicked.connect(self._clear_slot)
-            card.execute_clicked.connect(self._execute_slot)
-            card.hotkey_changed.connect(self._set_slot_hotkey)
-            self.slot_cards.append(card)
-            card.update_content(self._find_stratagem_in_loadout(idx), self._hotkey_for_loadout(idx))
-            loadout_panel.addWidget(card)
+        # 分隔线
+        sep = QFrame()
+        sep.setObjectName("separator")
+        sep.setFrameShape(QFrame.Shape.HLine)
+        root.addWidget(sep)
 
-        loadout_panel.addStretch()
-        main.addLayout(loadout_panel, 4)
+        # ═══════ 下部：2×5 战备网格 ═══════
+        self._build_grid(root)
 
-        # 右侧列表与操作
-        right_col = QVBoxLayout()
-        top_bar = QHBoxLayout()
-        top_bar.setObjectName("topBar")
-        title = QLabel("⚡ 战备浏览")
-        title.setStyleSheet("font-size:16px; font-weight:700;")
-        top_bar.addWidget(title)
-        top_bar.addSpacing(10)
-        top_bar.addWidget(QLabel("🔍"))
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("搜索名称 / 型号 / 描述…")
-        self.search_input.setFixedWidth(260)
-        self.search_input.textChanged.connect(self._on_search)
-        top_bar.addWidget(self.search_input)
-        top_bar.addStretch()
-
-        self.execute_btn = QPushButton("▶ 执行选中")
-        self.execute_btn.setObjectName("executeBtn")
-        self.execute_btn.clicked.connect(self._execute_selected)
-        top_bar.addWidget(self.execute_btn)
-
-        self.hotkey_btn = QPushButton("⌨ 战备快捷键")
-        self.hotkey_btn.clicked.connect(self._set_hotkey_for_selected)
-        top_bar.addWidget(self.hotkey_btn)
-
-        self.listen_btn = QPushButton("🔇 监听关")
-        self.listen_btn.setObjectName("listenBtn")
-        self.listen_btn.clicked.connect(self._toggle_listening)
-        top_bar.addWidget(self.listen_btn)
-
-        settings_btn = QPushButton("⚙ 按键设置")
-        settings_btn.clicked.connect(self._open_settings)
-        top_bar.addWidget(settings_btn)
-        right_col.addLayout(top_bar)
-
-        self.tab_widget = QTabWidget()
-        self.category_tables: dict[str, QTableWidget] = {}
-        for category in get_categories():
-            table = self._create_table()
-            self._populate_table(table, get_stratagems_by_category(category))
-            self.tab_widget.addTab(table, category)
-            self.category_tables[category] = table
-        self.search_table = self._create_table()
-        self._search_tab_added = False
-        right_col.addWidget(self.tab_widget)
-
-        main.addLayout(right_col, 8)
-
+        # 状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_label = QLabel()
-        self.hotkey_count_label = QLabel()
         self.listen_status_label = QLabel()
         self.status_bar.addWidget(self.status_label, 1)
-        self.status_bar.addPermanentWidget(self.hotkey_count_label)
         self.status_bar.addPermanentWidget(self.listen_status_label)
-        self._update_status("就绪 — 选择战备，双击执行或绑定槽位")
+        self._update_status("就绪 — 点击槽位选择战备")
 
-    def _create_table(self) -> QTableWidget:
-        table = QTableWidget()
-        table.setColumnCount(len(COLUMN_HEADERS))
-        table.setHorizontalHeaderLabels(COLUMN_HEADERS)
-        table.setAlternatingRowColors(True)
-        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        vheader = table.verticalHeader()
-        if vheader:
-            vheader.setVisible(False)
-        table.setShowGrid(False)
-        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+    # ─── 上部工具栏 ───
+    def _build_top_bar(self, parent_layout: QVBoxLayout):
+        bar = QFrame()
+        bar.setObjectName("topBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(8)
 
-        header = table.horizontalHeader()
-        if header:
-            header.setSectionResizeMode(COL_MODEL, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(COL_COMMAND, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(COL_HOTKEY, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(COL_DESC, QHeaderView.ResizeMode.Stretch)
-            header.setMinimumSectionSize(60)
+        # 标题
+        title = QLabel("⚡ HD2 战备助手")
+        title.setStyleSheet("font-size:16px; font-weight:800; letter-spacing:1px;")
+        layout.addWidget(title)
+        layout.addSpacing(16)
 
-        table.doubleClicked.connect(lambda idx: self._on_double_click(table, idx))
-        table.customContextMenuRequested.connect(lambda pos: self._show_context_menu(table, pos))
-        return table
+        # Profile 管理
+        layout.addWidget(QLabel("Profile:"))
+        self.profile_combo = QComboBox()
+        self.profile_combo.setMinimumWidth(140)
+        self.profile_combo.setEditable(False)
+        self._refresh_profile_combo()
+        layout.addWidget(self.profile_combo)
 
-    def _populate_table(self, table: QTableWidget, stratagems: list[dict]):
-        table.setRowCount(len(stratagems))
-        for row, s in enumerate(stratagems):
-            model_item = QTableWidgetItem(s["model"])
-            name_item = QTableWidgetItem(s["name"])
-            cmd_item = QTableWidgetItem(command_to_string(s["command"]))
-            cmd_item.setFont(QFont("Consolas", 13))
-            hk = self._stratagem_hotkeys.get((s["model"], s["name"]), "")
-            hk_item = QTableWidgetItem(format_key_display(hk))
-            if hk:
-                hk_item.setForeground(QColor("#ffa500"))
-            desc_item = QTableWidgetItem(s.get("description", ""))
-            for item in (model_item, name_item, cmd_item, hk_item, desc_item):
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            table.setItem(row, COL_MODEL, model_item)
-            table.setItem(row, COL_NAME, name_item)
-            table.setItem(row, COL_COMMAND, cmd_item)
-            table.setItem(row, COL_HOTKEY, hk_item)
-            table.setItem(row, COL_DESC, desc_item)
+        save_prof_btn = QPushButton("💾 保存")
+        save_prof_btn.setToolTip("保存当前负载为 Profile")
+        save_prof_btn.clicked.connect(self._save_profile)
+        layout.addWidget(save_prof_btn)
 
-    def _refresh_hotkey_column(self, table: QTableWidget):
-        for row in range(table.rowCount()):
-            model_item = table.item(row, COL_MODEL)
-            name_item = table.item(row, COL_NAME)
-            if not model_item or not name_item:
-                continue
-            key = (model_item.text(), name_item.text())
-            hk = self._stratagem_hotkeys.get(key, "")
-            hk_item = table.item(row, COL_HOTKEY)
-            if hk_item:
-                hk_item.setText(format_key_display(hk))
-                hk_item.setForeground(QColor("#ffa500") if hk else QColor("#5b4b1b"))
+        load_prof_btn = QPushButton("📂 读取")
+        load_prof_btn.setToolTip("读取选中的 Profile")
+        load_prof_btn.clicked.connect(self._load_profile)
+        layout.addWidget(load_prof_btn)
 
-    def _refresh_all_hotkeys(self):
-        for t in self.category_tables.values():
-            self._refresh_hotkey_column(t)
-        self._refresh_hotkey_column(self.search_table)
-        self._refresh_slot_hotkeys()
+        del_prof_btn = QPushButton("🗑 删除")
+        del_prof_btn.setToolTip("删除选中的 Profile")
+        del_prof_btn.clicked.connect(self._delete_profile)
+        layout.addWidget(del_prof_btn)
 
-    def _refresh_slot_hotkeys(self):
-        for idx, card in enumerate(self.slot_cards):
-            hk = self._hotkey_for_loadout(idx)
-            card.set_strat_hotkey(hk)
+        layout.addStretch()
 
-    def _active_table(self) -> QTableWidget:
-        w = self.tab_widget.currentWidget()
-        return w if isinstance(w, QTableWidget) else self.search_table
+        # 清空全部
+        clear_btn = QPushButton("✕ 清空全部")
+        clear_btn.setStyleSheet(
+            "border-color:#e85c5c; color:#e85c5c; font-size:12px; padding:5px 10px;"
+        )
+        clear_btn.clicked.connect(self._clear_all_slots)
+        layout.addWidget(clear_btn)
 
-    def _selected_stratagem(self, table: QTableWidget) -> dict | None:
-        selection = table.selectionModel()
-        if selection is None:
-            return None
-        rows = selection.selectedRows()
-        if not rows:
-            return None
-        row = rows[0].row()
-        model_item = table.item(row, COL_MODEL)
-        name_item = table.item(row, COL_NAME)
-        if not model_item or not name_item:
-            return None
-        model = model_item.text()
-        name = name_item.text()
-        for s in STRATAGEMS:
-            if s["model"] == model and s["name"] == name:
-                return s
-        return None
+        # 监听按钮
+        self.listen_btn = QPushButton("○ 监听关")
+        self.listen_btn.setObjectName("listenBtn")
+        self.listen_btn.setMinimumWidth(90)
+        self.listen_btn.clicked.connect(self._toggle_listening)
+        layout.addWidget(self.listen_btn)
 
-    # ------------- 搜索 -------------
-    def _on_search(self, text: str):
-        keyword = text.strip()
-        if not keyword:
-            if self._search_tab_added:
-                idx = self.tab_widget.indexOf(self.search_table)
-                if idx >= 0:
-                    self.tab_widget.removeTab(idx)
-                self._search_tab_added = False
-            return
-        results = search_stratagems(keyword)
-        self._populate_table(self.search_table, results)
-        if not self._search_tab_added:
-            self.tab_widget.addTab(self.search_table, "🔍 搜索结果")
-            self._search_tab_added = True
-        self.tab_widget.setCurrentWidget(self.search_table)
-        self._update_status(f"搜索 \"{keyword}\" — {len(results)} 条")
+        # 设置按钮
+        settings_btn = QPushButton("⚙ 设置")
+        settings_btn.setMinimumWidth(70)
+        settings_btn.clicked.connect(self._open_settings)
+        layout.addWidget(settings_btn)
 
-    # ------------- 表格交互 -------------
-    def _on_double_click(self, table: QTableWidget, index):
-        if index.column() == COL_HOTKEY:
-            self._set_hotkey_for_selected()
+        parent_layout.addWidget(bar)
+
+    # ─── 下部 2×5 网格 ───
+    def _build_grid(self, parent_layout: QVBoxLayout):
+        header = QHBoxLayout()
+        lbl = QLabel("⚔ 战备栏位")
+        lbl.setObjectName("gridTitle")
+        header.addWidget(lbl)
+        header.addStretch()
+        sub = QLabel("点击槽位选择战备，右键清除 / 执行")
+        sub.setObjectName("gridSubtitle")
+        header.addWidget(sub)
+        parent_layout.addLayout(header)
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        self.slot_buttons: list[QPushButton] = []
+
+        for idx in range(SLOT_COUNT):
+            btn = self._create_slot_button(idx)
+            row = idx // 5
+            col = idx % 5
+            grid.addWidget(btn, row, col)
+            self.slot_buttons.append(btn)
+
+        parent_layout.addLayout(grid, 1)
+
+    def _create_slot_button(self, idx: int) -> QPushButton:
+        btn = QPushButton()
+        btn.setObjectName("slotBtn")
+        btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        btn.setMinimumSize(140, 110)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        btn.clicked.connect(lambda _=False, i=idx: self._show_stratagem_menu(i))
+        btn.customContextMenuRequested.connect(lambda pos, i=idx: self._show_slot_context_menu(i, pos))
+        self._update_slot_button(btn, idx, self.loadout[idx])
+        return btn
+
+    def _display_name(self, s: dict) -> str:
+        model = s.get("model", "")
+        name = s.get("name", "")
+        if model and model != "无型号":
+            return f"{model}\n{name}"
+        return name
+
+    def _update_slot_button(self, btn: QPushButton, idx: int, item: dict | None):
+        """Update a slot button's text and style."""
+        hk = self.slot_hotkeys.get(str(idx), "")
+        hk_text = f"  [{format_key_display(hk)}]" if hk else ""
+        slot_label = f"槽{idx + 1}{hk_text}"
+
+        if item is None:
+            btn.setText(f"{slot_label}\n\n— EMPTY —")
+            btn.setProperty("filled", False)
         else:
-            s = self._selected_stratagem(table)
-            if s:
-                self._execute_stratagem(s)
+            # Find full stratagem data
+            strat = self._find_stratagem(item)
+            if strat:
+                cmd = command_to_string(strat["command"])
+                name = self._display_name(strat)
+                btn.setText(f"{slot_label}\n\n{name}\n{cmd}")
+            else:
+                btn.setText(f"{slot_label}\n\n{item.get('name', '?')}")
+            btn.setProperty("filled", True)
 
-    def _show_context_menu(self, table: QTableWidget, pos):
-        s = self._selected_stratagem(table)
-        if not s:
-            return
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+
+    def _refresh_all_slot_buttons(self):
+        for idx, btn in enumerate(self.slot_buttons):
+            self._update_slot_button(btn, idx, self.loadout[idx])
+
+    # ─────────── 级联菜单：选择战备 ───────────
+    def _show_stratagem_menu(self, slot_idx: int):
         menu = QMenu(self)
-        act_exec = menu.addAction("▶ 执行")
-        act_set_hk = menu.addAction("⌨ 设置战备快捷键")
+        menu.setMinimumWidth(200)
+
+        categories = get_categories()
+        for cat in categories:
+            sub_menu = menu.addMenu(cat)
+            if sub_menu is None:
+                continue
+            sub_menu.setMinimumWidth(240)
+            stratagems = get_stratagems_by_category(cat)
+            for s in stratagems:
+                name = self._display_name(s).replace("\n", "  ")
+                cmd = command_to_string(s["command"])
+                act = sub_menu.addAction(f"{name}   {cmd}")
+                act.setData(s)
+
+        chosen = menu.exec(self.slot_buttons[slot_idx].mapToGlobal(
+            self.slot_buttons[slot_idx].rect().center()
+        ))
+        if chosen is not None:
+            strat = chosen.data()
+            if strat:
+                self._assign_to_slot(slot_idx, strat)
+
+    # ─────────── 右键菜单 ───────────
+    def _show_slot_context_menu(self, slot_idx: int, pos):
+        menu = QMenu(self)
+        item = self.loadout[slot_idx]
+
+        if item:
+            exec_act = menu.addAction("▶ 执行")
+            clear_act = menu.addAction("✕ 清除")
+            menu.addSeparator()
+        else:
+            exec_act = None
+            clear_act = None
+
+        select_act = menu.addAction("☰ 选择战备…")
         menu.addSeparator()
-        sub_slots = menu.addMenu("设为槽位")
-        slot_actions = []
-        if sub_slots:
-            for idx in range(self.slot_count):
-                is_mission = idx == self.slot_count - 1
-                text = "任务常驻" if is_mission else f"槽{idx+1}"
-                act = sub_slots.addAction(text)
-                slot_actions.append(act)
-        viewport = table.viewport()
-        mapped_pos = viewport.mapToGlobal(pos) if viewport else QPoint()
-        chosen = menu.exec(mapped_pos)
-        if chosen == act_exec:
-            self._execute_stratagem(s)
-        elif chosen == act_set_hk:
-            self._set_hotkey_for_stratagem(s)
-        elif chosen in slot_actions:
-            slot_idx = slot_actions.index(chosen)
-            self._assign_to_slot(slot_idx, s)
 
-    # ------------- 执行 -------------
-    def _execute_selected(self):
-        s = self._selected_stratagem(self._active_table())
-        if s:
-            self._execute_stratagem(s)
+        # 快捷键设置
+        hk_act = menu.addAction("⌨ 设置快捷键…")
+        hk_clear_act = menu.addAction("⌨ 清除快捷键")
 
-    def _execute_stratagem(self, stratagem: dict):
-        if self._executing:
+        btn = self.slot_buttons[slot_idx]
+        chosen = menu.exec(btn.mapToGlobal(pos))
+        if chosen is None:
             return
-        self._executing = True
-        name = stratagem["name"]
-        cmd = command_to_string(stratagem["command"])
-        self._update_status(f"正在执行: {name} ({cmd}) …")
-        thread = threading.Thread(target=self._execute_thread, args=(stratagem,), daemon=True)
-        thread.start()
 
-    def _execute_thread(self, stratagem: dict):
-        try:
-            execute_stratagem(stratagem, self.config)
-            QTimer.singleShot(0, lambda: self._update_status(f"✔ 已执行: {stratagem['name']}"))
-        except ImportError:
-            QTimer.singleShot(0, lambda: QMessageBox.critical(self, "缺少依赖", "请安装 keyboard 模块:\npip install keyboard"))
-        except Exception as exc:
-            QTimer.singleShot(0, lambda: QMessageBox.critical(self, "执行错误", str(exc)))
-        finally:
-            self._executing = False
+        if chosen == exec_act and item:
+            self._execute_slot(slot_idx)
+        elif chosen == clear_act:
+            self._clear_slot(slot_idx)
+        elif chosen == select_act:
+            self._show_stratagem_menu(slot_idx)
+        elif chosen == hk_act:
+            self._capture_slot_hotkey(slot_idx)
+        elif chosen == hk_clear_act:
+            self._set_slot_hotkey(slot_idx, "")
 
-    # ------------- 槽位管理 -------------
-    def _assign_selected_to_slot(self, idx: int):
-        s = self._selected_stratagem(self._active_table())
-        if s:
-            self._assign_to_slot(idx, s)
+    # ─────────── 快捷键捕获 ───────────
+    def _capture_slot_hotkey(self, slot_idx: int):
+        """Open a small dialog to capture a hotkey for this slot."""
+        self._capture_mode = True
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"槽{slot_idx + 1} 快捷键")
+        dlg.setFixedSize(280, 120)
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(f"为槽 {slot_idx + 1} 按下快捷键…"))
+        cap = KeyCaptureButton(self.slot_hotkeys.get(str(slot_idx), ""), dlg)
+        cap.setFixedWidth(180)
+        layout.addWidget(cap, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        btn_row = QHBoxLayout()
+        ok_btn = QPushButton("确定")
+        ok_btn.clicked.connect(dlg.accept)
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(ok_btn)
+        layout.addLayout(btn_row)
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._set_slot_hotkey(slot_idx, cap.get_key())
+        cap.cleanup()
+        self._capture_mode = False
+
+    # ─────────── 槽位操作 ───────────
     def _assign_to_slot(self, idx: int, stratagem: dict):
-        if idx < 0 or idx >= self.slot_count:
-            return
         self.loadout[idx] = {"model": stratagem["model"], "name": stratagem["name"]}
-        self.slot_cards[idx].update_content(stratagem, self._stratagem_hotkeys.get((stratagem["model"], stratagem["name"]), ""))
+        self._update_slot_button(self.slot_buttons[idx], idx, self.loadout[idx])
         self._persist_loadout()
-        self._update_status(f"槽 {idx+1} 已设置为 {stratagem['name']}")
+        self._update_status(f"槽 {idx + 1} ← {stratagem['name']}")
 
     def _clear_slot(self, idx: int):
-        if idx < 0 or idx >= self.slot_count:
-            return
         self.loadout[idx] = None
-        self.slot_cards[idx].update_content(None, "")
+        self._update_slot_button(self.slot_buttons[idx], idx, None)
         self._persist_loadout()
-        self._update_status(f"槽 {idx+1} 已清除")
+        self._update_status(f"槽 {idx + 1} 已清除")
+
+    def _clear_all_slots(self):
+        for idx in range(SLOT_COUNT):
+            self.loadout[idx] = None
+        self.slot_hotkeys.clear()
+        self._rebuild_slot_key_map()
+        self._refresh_all_slot_buttons()
+        self._persist_loadout()
+        self._update_status("已清空全部槽位")
 
     def _execute_slot(self, idx: int):
-        if idx < 0 or idx >= self.slot_count:
-            return
-        stratagem = self._find_stratagem_in_loadout(idx)
-        if stratagem:
-            self._execute_stratagem(stratagem)
+        strat = self._find_stratagem_from_loadout(idx)
+        if strat:
+            self._execute_stratagem(strat)
 
-    def _find_stratagem_in_loadout(self, idx: int) -> dict | None:
-        if idx < 0 or idx >= self.slot_count:
-            return None
-        item = self.loadout[idx]
+    # ─────────── 查找战备 ───────────
+    def _find_stratagem(self, item: dict | None) -> dict | None:
         if not item:
             return None
         for s in STRATAGEMS:
@@ -802,84 +741,120 @@ class StratagemApp(QMainWindow):
                 return s
         return None
 
-    def _hotkey_for_loadout(self, idx: int) -> str:
-        if idx < 0 or idx >= self.slot_count:
-            return ""
-        item = self.loadout[idx]
-        if not item:
-            return ""
-        return self._stratagem_hotkeys.get((item.get("model"), item.get("name")), "")
+    def _find_stratagem_from_loadout(self, idx: int) -> dict | None:
+        if idx < 0 or idx >= SLOT_COUNT:
+            return None
+        return self._find_stratagem(self.loadout[idx])
 
-    def _persist_loadout(self):
-        self.config["loadout"] = self.loadout
-        self.config["slot_count"] = self.slot_count
-        save_config(self.config)
-
-    # ------------- 战备快捷键（单个） -------------
-    def _set_hotkey_for_selected(self):
-        s = self._selected_stratagem(self._active_table())
-        if s:
-            self._set_hotkey_for_stratagem(s)
-
-    def _set_hotkey_for_stratagem(self, stratagem: dict):
-        self._capture_mode = True
-        dialog = KeyCaptureDialog(self, f"设置快捷键 — {stratagem['name']}")
-        result = dialog.exec()
-        self._capture_mode = False
-        if result != QDialog.DialogCode.Accepted:
+    # ─────────── 执行 ───────────
+    def _execute_stratagem(self, stratagem: dict):
+        if self._executing:
             return
-        key = dialog.captured_key
-        if key is None:
-            return
-        key_pair = (stratagem["model"], stratagem["name"])
-        if key == "":
-            self._clear_hotkey_for_stratagem(stratagem)
-            return
-        if key in self._hotkey_map:
-            old = self._hotkey_map[key]
-            self._stratagem_hotkeys.pop((old["model"], old["name"]), None)
-        old_key = self._stratagem_hotkeys.get(key_pair)
-        if old_key:
-            self._hotkey_map.pop(old_key, None)
-            self.config["stratagem_hotkeys"].pop(old_key, None)
-        self._hotkey_map[key] = stratagem
-        self._stratagem_hotkeys[key_pair] = key
-        self.config["stratagem_hotkeys"][key] = {"model": stratagem["model"], "name": stratagem["name"]}
-        save_config(self.config)
-        self._refresh_all_hotkeys()
-        self._update_status(f"已绑定: {format_key_display(key)} → {stratagem['name']}")
+        self._executing = True
+        name = stratagem["name"]
+        cmd = command_to_string(stratagem["command"])
+        self._update_status(f"正在执行: {name} ({cmd}) …")
+        thread = threading.Thread(target=self._exec_thread, args=(stratagem,), daemon=True)
+        thread.start()
 
-    def _clear_hotkey_for_stratagem(self, stratagem: dict):
-        key_pair = (stratagem["model"], stratagem["name"])
-        old_key = self._stratagem_hotkeys.pop(key_pair, None)
-        if old_key:
-            self._hotkey_map.pop(old_key, None)
-            self.config["stratagem_hotkeys"].pop(old_key, None)
-            save_config(self.config)
-        self._refresh_all_hotkeys()
-        self._update_status(f"已清除 {stratagem['name']} 的快捷键")
+    def _exec_thread(self, stratagem: dict):
+        try:
+            execute_stratagem(stratagem, self.config)
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._update_status(f"✔ 已执行: {stratagem['name']}"))
+        except Exception as exc:
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: QMessageBox.critical(self, "执行错误", str(exc)))
+        finally:
+            self._executing = False
 
-    # ------------- 槽位快捷键 -------------
+    # ─────────── 快捷键管理 ───────────
     def _set_slot_hotkey(self, idx: int, key: str):
-        if idx < 0 or idx >= self.slot_count:
-            return
-        if key is None:
-            return
-        if key == "":
-            self.slot_hotkeys.pop(str(idx), None)
-        else:
-            # 去重：同一键只保留最后设定的槽
+        if key:
+            # 去重
             for slot_str, k in list(self.slot_hotkeys.items()):
                 if k == key:
                     self.slot_hotkeys.pop(slot_str, None)
             self.slot_hotkeys[str(idx)] = key
+        else:
+            self.slot_hotkeys.pop(str(idx), None)
+
+        self._rebuild_slot_key_map()
+        self._update_slot_button(self.slot_buttons[idx], idx, self.loadout[idx])
+        self._persist_loadout()
+        self._update_status(
+            f"槽 {idx + 1} 快捷键 → {format_key_display(key)}" if key
+            else f"槽 {idx + 1} 快捷键已清除"
+        )
+
+    # ─────────── Profile 管理 ───────────
+    def _refresh_profile_combo(self):
+        self.profile_combo.clear()
+        self.profile_combo.addItem("（未选择）")
+        for name in list_profiles():
+            self.profile_combo.addItem(name)
+
+    def _save_profile(self):
+        name, ok = QInputDialog.getText(
+            self, "保存 Profile", "请输入 Profile 名称:",
+            text=self.profile_combo.currentText() if self.profile_combo.currentIndex() > 0 else "",
+        )
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        save_profile(name, self.loadout, self.slot_hotkeys)
+        self.config["last_profile"] = name
+        save_config(self.config)
+        self._refresh_profile_combo()
+        # 选中刚保存的
+        idx = self.profile_combo.findText(name)
+        if idx >= 0:
+            self.profile_combo.setCurrentIndex(idx)
+        self._update_status(f"Profile \"{name}\" 已保存")
+
+    def _load_profile(self):
+        idx = self.profile_combo.currentIndex()
+        if idx <= 0:
+            QMessageBox.information(self, "提示", "请先选择一个 Profile")
+            return
+        name = self.profile_combo.currentText()
+        data = load_profile(name)
+        if data is None:
+            QMessageBox.warning(self, "错误", f"无法读取 Profile \"{name}\"")
+            return
+        self.loadout = data["loadout"]
+        self.slot_hotkeys = data.get("slot_hotkeys", {})
+        self._rebuild_slot_key_map()
+        self._refresh_all_slot_buttons()
+        self._persist_loadout()
+        self.config["last_profile"] = name
+        save_config(self.config)
+        self._update_status(f"已载入 Profile \"{name}\"")
+
+    def _delete_profile(self):
+        idx = self.profile_combo.currentIndex()
+        if idx <= 0:
+            QMessageBox.information(self, "提示", "请先选择一个 Profile")
+            return
+        name = self.profile_combo.currentText()
+        reply = QMessageBox.question(
+            self, "确认删除",
+            f"确定删除 Profile \"{name}\"？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        delete_profile(name)
+        self._refresh_profile_combo()
+        self._update_status(f"Profile \"{name}\" 已删除")
+
+    # ─────────── 持久化 ───────────
+    def _persist_loadout(self):
+        self.config["loadout"] = self.loadout
         self.config["slot_hotkeys"] = self.slot_hotkeys
         save_config(self.config)
-        self._rebuild_slot_key_map()
-        self.slot_cards[idx].set_hotkey(key)
-        self._update_status(f"槽 {idx+1} 快捷键已更新为 {format_key_display(key)}" if key else f"槽 {idx+1} 快捷键已清除")
 
-    # ------------- 全局监听 -------------
+    # ─────────── 全局监听 ───────────
     def _start_listening(self):
         if self._global_hook is not None:
             return
@@ -909,27 +884,26 @@ class StratagemApp(QMainWindow):
         key = event.name
         if key in self.slot_key_map:
             self._slot_triggered.emit(self.slot_key_map[key])
-            return
-        if key in self._hotkey_map:
-            self._hotkey_triggered.emit(self._hotkey_map[key])
-
-    def _on_hotkey_triggered(self, stratagem: dict):
-        if not self._executing:
-            self._execute_stratagem(stratagem)
 
     def _update_listen_ui(self):
         if self._listening:
-            self.listen_btn.setText("🔊 监听开")
+            self.listen_btn.setText("● 监听开")
             self.listen_btn.setProperty("active", True)
         else:
-            self.listen_btn.setText("🔇 监听关")
+            self.listen_btn.setText("○ 监听关")
             self.listen_btn.setProperty("active", False)
-        bound = len(self._stratagem_hotkeys)
-        self.hotkey_count_label.setText(f"战备快捷键 {bound}")
-        self.listen_status_label.setText("● 监听中" if self._listening else "○ 未监听")
-        self.listen_status_label.setStyleSheet("color:#4be85c;" if self._listening else "color:#666;")
+        self.listen_btn.style().unpolish(self.listen_btn)
+        self.listen_btn.style().polish(self.listen_btn)
 
-    # ------------- 设置对话框 -------------
+        slots_bound = sum(1 for k in self.slot_hotkeys.values() if k)
+        self.listen_status_label.setText(
+            f"快捷键 {slots_bound} | {'● 监听中' if self._listening else '○ 未监听'}"
+        )
+        self.listen_status_label.setStyleSheet(
+            "color:#4be85c;" if self._listening else "color:#666;"
+        )
+
+    # ─────────── 设置对话框 ───────────
     def _open_settings(self):
         self._capture_mode = True
         dialog = SettingsDialog(self, self.config)
@@ -942,27 +916,22 @@ class StratagemApp(QMainWindow):
             self._update_status("按键设置已保存")
         self._capture_mode = False
 
-    # ------------- 状态 / 键盘 -------------
+    # ─────────── 状态 ───────────
     def _update_status(self, text: str = ""):
         self.status_label.setText(text)
         self._update_listen_ui()
 
+    # ─────────── 键盘快捷 ───────────
     def keyPressEvent(self, a0):
         if a0 is None:
             return
         key = a0.key()
-        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self._execute_selected()
-        elif key == Qt.Key.Key_Delete:
-            s = self._selected_stratagem(self._active_table())
-            if s:
-                self._clear_hotkey_for_stratagem(s)
-        elif key == Qt.Key.Key_F5:
+        if key == Qt.Key.Key_F5:
             self._toggle_listening()
         else:
             super().keyPressEvent(a0)
 
-    # ------------- 关闭清理 -------------
+    # ─────────── 关闭清理 ───────────
     def closeEvent(self, a0):
         self.config["listening_enabled"] = self._listening
         save_config(self.config)
@@ -974,12 +943,14 @@ class StratagemApp(QMainWindow):
         if a0:
             a0.accept()
 
+
 def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(STYLESHEET)
     window = StratagemApp()
     window.show()
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()

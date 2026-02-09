@@ -1,14 +1,16 @@
 """
 按键与负载配置管理。
-Manages direction bindings, stratagem activation key, per-stratagem hotkeys,
-and loadout slots with slot-level hotkeys for quick in-game triggers.
+Manages direction bindings, stratagem activation key,
+loadout slots with slot-level hotkeys, and named profiles.
 """
 
 import json
 import os
 
 # Default config file path (next to this script)
-DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_CONFIG_PATH = os.path.join(_DIR, "config.json")
+PROFILES_DIR = os.path.join(_DIR, "profiles")
 
 # Default key bindings: maps direction arrows to keyboard keys
 DEFAULT_KEY_BINDINGS = {
@@ -24,9 +26,8 @@ DEFAULT_STRATAGEM_KEY = "ctrl"
 # Delay between key presses in seconds
 DEFAULT_KEY_DELAY = 0.05
 
-# Loadout slots (default 5: 4 常用 + 1 常驻，可扩展)
-DEFAULT_SLOT_COUNT = 5
-DEFAULT_LOADOUT = [None] * DEFAULT_SLOT_COUNT
+# Fixed 10 slots (2x5 grid)
+SLOT_COUNT = 10
 
 
 def _make_default():
@@ -35,11 +36,10 @@ def _make_default():
         "key_bindings": dict(DEFAULT_KEY_BINDINGS),
         "stratagem_key": DEFAULT_STRATAGEM_KEY,
         "key_delay": DEFAULT_KEY_DELAY,
-        "stratagem_hotkeys": {},       # {"key_name": {"model": "...", "name": "..."}}
         "slot_hotkeys": {},            # {"0": "f1", ...}
-        "slot_count": DEFAULT_SLOT_COUNT,
-        "loadout": list(DEFAULT_LOADOUT),
+        "loadout": [None] * SLOT_COUNT,
         "listening_enabled": True,
+        "last_profile": "",
     }
 
 
@@ -56,7 +56,6 @@ def load_config(path=None):
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Merge with defaults so missing keys get filled in
         config = dict(default)
         if "key_bindings" in data and isinstance(data["key_bindings"], dict):
             config["key_bindings"] = data["key_bindings"]
@@ -64,27 +63,19 @@ def load_config(path=None):
             config["stratagem_key"] = data["stratagem_key"]
         if "key_delay" in data:
             config["key_delay"] = float(data["key_delay"])
-        if "stratagem_hotkeys" in data and isinstance(data["stratagem_hotkeys"], dict):
-            config["stratagem_hotkeys"] = data["stratagem_hotkeys"]
-        if "slot_count" in data:
-            try:
-                config["slot_count"] = max(1, int(data["slot_count"]))
-            except Exception:
-                pass
-        slot_count = config.get("slot_count", DEFAULT_SLOT_COUNT)
         if "slot_hotkeys" in data and isinstance(data.get("slot_hotkeys"), dict):
-            # 只保留合法槽位的键
             config["slot_hotkeys"] = {
                 k: v for k, v in data["slot_hotkeys"].items()
-                if k.isdigit() and int(k) < slot_count
+                if k.isdigit()
             }
         if "loadout" in data and isinstance(data.get("loadout"), list):
-            cfg_loadout = data["loadout"][:slot_count] + [None] * max(0, slot_count - len(data["loadout"]))
-            config["loadout"] = cfg_loadout
-        else:
-            config["loadout"] = [None] * slot_count
+            raw = data["loadout"]
+            # Pad / truncate to SLOT_COUNT
+            config["loadout"] = (raw + [None] * SLOT_COUNT)[:SLOT_COUNT]
         if "listening_enabled" in data:
             config["listening_enabled"] = bool(data["listening_enabled"])
+        if "last_profile" in data:
+            config["last_profile"] = str(data["last_profile"])
         return config
     except (json.JSONDecodeError, ValueError, OSError):
         return default
@@ -102,3 +93,54 @@ def save_config(config, path=None):
 def get_key_for_direction(direction, config):
     """Get the keyboard key mapped to a direction arrow."""
     return config["key_bindings"].get(direction, direction)
+
+
+# ─── Profile 管理 ───────────────────────────────────────────
+
+def _ensure_profiles_dir():
+    os.makedirs(PROFILES_DIR, exist_ok=True)
+
+
+def list_profiles() -> list[str]:
+    """Return sorted list of profile names (without .json extension)."""
+    _ensure_profiles_dir()
+    names = []
+    for fn in os.listdir(PROFILES_DIR):
+        if fn.endswith(".json"):
+            names.append(fn[:-5])
+    names.sort()
+    return names
+
+
+def save_profile(name: str, loadout: list, slot_hotkeys: dict):
+    """Save a named profile (loadout + hotkeys)."""
+    _ensure_profiles_dir()
+    data = {"loadout": loadout, "slot_hotkeys": slot_hotkeys}
+    path = os.path.join(PROFILES_DIR, f"{name}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def load_profile(name: str) -> dict | None:
+    """Load a named profile. Returns dict with 'loadout' and 'slot_hotkeys', or None."""
+    path = os.path.join(PROFILES_DIR, f"{name}.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        loadout = data.get("loadout", [None] * SLOT_COUNT)
+        loadout = (loadout + [None] * SLOT_COUNT)[:SLOT_COUNT]
+        return {
+            "loadout": loadout,
+            "slot_hotkeys": data.get("slot_hotkeys", {}),
+        }
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def delete_profile(name: str):
+    """Delete a named profile."""
+    path = os.path.join(PROFILES_DIR, f"{name}.json")
+    if os.path.exists(path):
+        os.remove(path)
