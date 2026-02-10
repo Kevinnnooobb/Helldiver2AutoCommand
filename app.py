@@ -448,9 +448,18 @@ class StratagemApp(QMainWindow):
     # ─────────── 槽位键映射 ───────────
     def _rebuild_slot_key_map(self):
         self.slot_key_map.clear()
+        self.slot_scancode_map: dict[int, int] = {}  # scan_code → slot_index
         for slot_str, key in self.slot_hotkeys.items():
             if key:
                 self.slot_key_map[key] = int(slot_str)
+                # 同时按扫描码建立映射，这样即使 Shift 按住改变了键名
+                # （如 "1" 变成 "!"），扫描码不变仍能匹配
+                try:
+                    scan_codes = keyboard.key_to_scan_codes(key)
+                    for sc in scan_codes:
+                        self.slot_scancode_map[sc] = int(slot_str)
+                except Exception:
+                    pass
 
     # ─────────── UI 构建 ───────────
     def _build_ui(self):
@@ -881,9 +890,16 @@ class StratagemApp(QMainWindow):
     def _on_global_key(self, event):
         if self._capture_mode or self._executing:
             return
+        # 优先按键名匹配
         key = event.name
         if key in self.slot_key_map:
             self._slot_triggered.emit(self.slot_key_map[key])
+            return
+        # 按住 Shift 等修饰键时，keyboard 库会改变 event.name
+        # （如 "1" → "!", "a" → "A"），用扫描码做兜底匹配
+        sc = getattr(event, 'scan_code', None)
+        if sc is not None and sc in self.slot_scancode_map:
+            self._slot_triggered.emit(self.slot_scancode_map[sc])
 
     def _update_listen_ui(self):
         if self._listening:

@@ -71,6 +71,26 @@ _SendInput = _user32.SendInput
 _SendInput.argtypes = [ctypes.c_uint, ctypes.POINTER(INPUT), ctypes.c_int]
 _SendInput.restype  = ctypes.c_uint
 
+_GetAsyncKeyState = _user32.GetAsyncKeyState
+_GetAsyncKeyState.argtypes = [ctypes.c_int]
+_GetAsyncKeyState.restype  = ctypes.wintypes.SHORT
+
+# 虚拟键码，用于 GetAsyncKeyState 检测按键状态
+VK_LSHIFT   = 0xA0
+VK_RSHIFT   = 0xA1
+VK_LCONTROL = 0xA2
+VK_RCONTROL = 0xA3
+VK_LMENU    = 0xA4   # Left Alt
+VK_RMENU    = 0xA5   # Right Alt
+
+# 需要在执行战备前临时释放的修饰键 (vk_code, key_name)
+_MODIFIERS_TO_RELEASE = [
+    (VK_LSHIFT,  "left shift"),
+    (VK_RSHIFT,  "right shift"),
+    (VK_LMENU,   "left alt"),
+    (VK_RMENU,   "right alt"),
+]
+
 # ─── 硬件扫描码表 (scan_code, is_extended) ─────────────────────────
 # 参考：https://www.win.tue.nl/~aeb/linux/kbd/scancodes-1.html
 
@@ -201,6 +221,31 @@ def _release_key(key_name: str):
     _send_key_event(sc, ext, key_up=True)
 
 
+def _is_key_pressed(vk_code: int) -> bool:
+    """通过 GetAsyncKeyState 判断某个键是否正被按下。"""
+    return (_GetAsyncKeyState(vk_code) & 0x8000) != 0
+
+
+def _release_held_modifiers() -> list[str]:
+    """释放当前按住的修饰键(Shift/Alt)，返回被释放的键名列表。"""
+    released = []
+    for vk, name in _MODIFIERS_TO_RELEASE:
+        if _is_key_pressed(vk):
+            sc, ext = _lookup_key(name)
+            _send_key_event(sc, ext, key_up=True)
+            released.append(name)
+            logger.debug("临时释放修饰键: %s", name)
+    return released
+
+
+def _restore_modifiers(keys: list[str]):
+    """重新按下之前被临时释放的修饰键。"""
+    for name in keys:
+        sc, ext = _lookup_key(name)
+        _send_key_event(sc, ext, key_up=False)
+        logger.debug("恢复修饰键: %s", name)
+
+
 def execute_stratagem(stratagem, config, keyboard_module=None):
     """
     Execute a stratagem command sequence by simulating key presses.
@@ -226,6 +271,7 @@ def execute_stratagem(stratagem, config, keyboard_module=None):
     )
 
     # Hold down the stratagem activation key
+    # 不释放已按住的修饰键（如左Shift奔跑），游戏支持同时奔跑和呼叫战备
     _press_key(stratagem_key)
     time.sleep(key_delay)
 
