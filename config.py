@@ -6,9 +6,16 @@ loadout slots with slot-level hotkeys, and named profiles.
 
 import json
 import os
+import sys
 
-# Default config file path (next to this script)
-_DIR = os.path.dirname(os.path.abspath(__file__))
+# When packaged by PyInstaller as a one-file exe, __file__ points to a
+# temporary extraction folder that is deleted on exit.  Use the directory
+# where the exe lives instead so that config / profiles persist.
+if getattr(sys, "frozen", False):
+    _DIR = os.path.dirname(sys.executable)
+else:
+    _DIR = os.path.dirname(os.path.abspath(__file__))
+
 DEFAULT_CONFIG_PATH = os.path.join(_DIR, "config.json")
 PROFILES_DIR = os.path.join(_DIR, "profiles")
 

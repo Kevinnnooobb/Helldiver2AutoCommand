@@ -448,16 +448,25 @@ class StratagemApp(QMainWindow):
     # ─────────── 槽位键映射 ───────────
     def _rebuild_slot_key_map(self):
         self.slot_key_map.clear()
-        self.slot_scancode_map: dict[int, int] = {}  # scan_code → slot_index
+        self.slot_scancode_map: dict[tuple[int, bool], int] = {}  # (scan_code, is_keypad) → slot_index
         for slot_str, key in self.slot_hotkeys.items():
             if key:
                 self.slot_key_map[key] = int(slot_str)
                 # 同时按扫描码建立映射，这样即使 Shift 按住改变了键名
                 # （如 "1" 变成 "!"），扫描码不变仍能匹配
+                # 需要区分小键盘与主键区，避免 Num6 (scan 0x4D) 与 方向键→ (scan 0x4D 扩展) 冲突
                 try:
                     scan_codes = keyboard.key_to_scan_codes(key)
+                    is_kp_binding = key.lower().startswith(("num ", "numpad", "num"))
+
+                    def _is_keypad_scancode(sc: int) -> bool:
+                        # 小键盘区域典型扫描码 0x47-0x53 (十进制 71-83)
+                        return 71 <= sc <= 83
+
                     for sc in scan_codes:
-                        self.slot_scancode_map[sc] = int(slot_str)
+                        if _is_keypad_scancode(sc) != is_kp_binding:
+                            continue  # 只保留与绑定类型一致的扫描码
+                        self.slot_scancode_map[(sc, is_kp_binding)] = int(slot_str)
                 except Exception:
                     pass
 
@@ -898,8 +907,9 @@ class StratagemApp(QMainWindow):
         # 按住 Shift 等修饰键时，keyboard 库会改变 event.name
         # （如 "1" → "!", "a" → "A"），用扫描码做兜底匹配
         sc = getattr(event, 'scan_code', None)
-        if sc is not None and sc in self.slot_scancode_map:
-            self._slot_triggered.emit(self.slot_scancode_map[sc])
+        is_kp = getattr(event, 'is_keypad', False)
+        if sc is not None and (sc, is_kp) in self.slot_scancode_map:
+            self._slot_triggered.emit(self.slot_scancode_map[(sc, is_kp)])
 
     def _update_listen_ui(self):
         if self._listening:
