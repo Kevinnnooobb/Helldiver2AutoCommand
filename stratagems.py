@@ -692,6 +692,20 @@ STRATAGEMS = [
         "command": [LEFT, DOWN, RIGHT, UP, LEFT, DOWN, UP],
         "description": "双机炮外骨骼",
     },
+    {
+        "category": CATEGORY_VEHICLES,
+        "model": "M-102",
+        "name": "快速侦察车",
+        "command": [LEFT, DOWN, RIGHT, DOWN, RIGHT, DOWN, UP],
+        "description": "快速机动载具",
+    },
+    {
+        "category": CATEGORY_VEHICLES,
+        "model": "TD-220",
+        "name": "堡垒MK XVI",
+        "command": [LEFT, DOWN, RIGHT, DOWN, LEFT, DOWN, UP, DOWN, UP],
+        "description": "重型堡垒载具",
+    },
 ]
 
 
